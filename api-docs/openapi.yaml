@@ -1,0 +1,195 @@
+openapi: 3.0.3
+info:
+  title: TyyCode Internal API
+  version: 1.0.0
+  description: |
+    TyyCode 内部模块接口规范。
+
+    本文档定义 TyyCode 各模块间的接口契约，用于指导开发和测试。
+    这不是 HTTP API，而是 Python 模块间的调用规范。
+
+    ## 通用约定
+    - 所有工具返回 ToolResult 结构
+    - 错误通过异常或错误码传递
+    - 流式输出通过 AsyncIterator 传递
+
+servers:
+  - url: n/a (local CLI)
+    description: 本地 CLI 工具，无 HTTP 服务
+
+tags:
+  - name: tools
+    description: 工具系统接口
+  - name: agent
+    description: Agent 核心接口
+  - name: llm
+    description: LLM 调用接口
+
+paths: {}
+
+components:
+  schemas:
+    # 工具调用请求（来自 LLM 响应）
+    ToolCall:
+      type: object
+      required:
+        - id
+        - name
+        - arguments
+      properties:
+        id:
+          type: string
+          description: 工具调用 ID
+          example: "call_abc123"
+        name:
+          type: string
+          description: 工具名称
+          example: "read_file"
+        arguments:
+          type: object
+          description: 工具参数
+          example:
+            path: "src/main.py"
+
+    # 工具执行结果
+    ToolResult:
+      type: object
+      required:
+        - success
+        - output
+      properties:
+        success:
+          type: boolean
+          description: 是否执行成功
+        output:
+          type: string
+          description: 执行结果文本
+        error:
+          type: string
+          description: 错误信息（success=false 时）
+        metadata:
+          type: object
+          description: 额外元数据（如文件行数、匹配数等）
+
+    # 工具定义（注册到 LLM）
+    ToolDefinition:
+      type: object
+      required:
+        - name
+        - description
+        - parameters
+      properties:
+        name:
+          type: string
+          description: 工具唯一名称
+          example: "read_file"
+        description:
+          type: string
+          description: 工具功能描述
+          example: "读取指定路径的文件内容"
+        parameters:
+          type: object
+          description: JSON Schema 格式的参数定义
+
+    # 对话消息
+    Message:
+      type: object
+      required:
+        - role
+        - content
+      properties:
+        role:
+          type: string
+          enum: [system, user, assistant, tool]
+        content:
+          type: string
+          description: 消息内容
+        tool_calls:
+          type: array
+          items:
+            $ref: "#/components/schemas/ToolCall"
+          description: assistant 消息中的工具调用
+        tool_call_id:
+          type: string
+          description: tool 角色消息对应的调用 ID
+
+    # Agent 配置
+    AgentConfig:
+      type: object
+      properties:
+        model:
+          type: string
+          description: 使用的模型名称
+          example: "gpt-4o"
+        max_tokens:
+          type: integer
+          description: 最大输出 token 数
+          example: 4096
+        temperature:
+          type: number
+          format: float
+          description: 采样温度
+          example: 0.7
+        max_history_tokens:
+          type: integer
+          description: 历史上下文最大 token 数
+          example: 8000
+
+    # 配置
+    TyyCodeConfig:
+      type: object
+      properties:
+        api_key:
+          type: string
+          description: LLM API 密钥
+        base_url:
+          type: string
+          description: 自定义 API endpoint
+        model:
+          type: string
+          description: 默认模型名称
+        project_path:
+          type: string
+          description: 当前项目路径
+
+  # 工具接口定义（Python Protocol）
+  x-tool-interface:
+    description: |
+      所有工具必须实现 Tool 基类：
+
+      ```python
+      from abc import ABC, abstractmethod
+      from pydantic import BaseModel
+
+      class Tool(ABC):
+          @property
+          @abstractmethod
+          def name(self) -> str: ...
+
+          @property
+          @abstractmethod
+          def description(self) -> str: ...
+
+          @property
+          @abstractmethod
+          def parameters_schema(self) -> dict: ...
+
+          @abstractmethod
+          async def execute(self, **kwargs) -> ToolResult: ...
+      ```
+
+  # Agent 主循环接口
+  x-agent-interface:
+    description: |
+      Agent 核心循环：
+
+      ```python
+      class Agent:
+          async def run(self, user_input: str) -> AsyncIterator[str]:
+              """接收用户输入，流式返回响应"""
+              ...
+
+          async def _process_tool_calls(self, tool_calls: list[ToolCall]) -> list[ToolResult]:
+              """执行工具调用，返回结果"""
+              ...
+      ```
